@@ -7,10 +7,13 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <sys/stat.h>
+#include <pwd.h>
+#include <grp.h>
 
 struct ProcInfo{
     int pid;
-    char user[10];
+    char user[30];
     int pr;
     int ni;
     int virt;
@@ -19,7 +22,7 @@ struct ProcInfo{
     char s;
     double cpu;
     double mem;
-    char time[10];
+    int time;
     char command[20];
 };
 
@@ -45,7 +48,11 @@ char* parseFile(char* path, char* buf, char* head, char* tail){
         return NULL;
     }
     if(head != ""){
-        h = strstr(buf, head) - buf;
+        char *result = strstr(buf, head);
+        h = result - buf;
+    }
+    else{
+        h = 0;
     }
     if(tail != ""){
         char *result = strstr(buf, tail);
@@ -54,9 +61,11 @@ char* parseFile(char* path, char* buf, char* head, char* tail){
     else{
         t = strlen(buf);
     }
-
+    
     block = calloc(1, t - h + 1);
+    // printf("parse: %s, %d, %d\n\n", path, h, t-h);
     memcpy(block, buf + h, t - h);
+    
     return block;
 }
 
@@ -83,9 +92,11 @@ char* parseBuf(char* buf, char* head, char* tail){
 // parse buffer, return numbers in arr
 void parseNum(char *buf, int *arr, int len){
     int flag = len;
-    int head, tail;
-    for(int i = 0; i < strlen(buf) || flag != 0; i++){
-        if(buf[i] >= '0' && buf[i] <= '9' && buf[i-1] == ' '){
+    for(int i = 0; i < strlen(buf) && flag != 0; i++){
+        if(buf[i] == ' ' || buf[i] == '\n' || buf[i] == '\t' || buf[i] == '\r'){
+            continue;
+        }
+        if(buf[i] >= '0' && buf[i] <= '9' ){
             int j = 0;
             char numbuf[10] = {0};
             while(buf[i] >= '0' && buf[i] <= '9' && i < strlen(buf)){
@@ -102,11 +113,11 @@ void parseNum(char *buf, int *arr, int len){
 // parse buffer, return the len-th word in str
 void parseStr(char *buf, char **str, int len){
     int flag = 0;
-    char *strbuf = calloc(1, 30);
+    char *strbuf = calloc(1, 50);
     if(len == 1){
         int j, i;
         i = j = 0;
-        while(buf[i] != ' '){
+        while(buf[i] != ' ' && buf[i] != '\n' && buf[i] != '\t' && buf[i] != '\r'){
             strbuf[j] = buf[i];
             j++;
             i++;
@@ -114,16 +125,24 @@ void parseStr(char *buf, char **str, int len){
     }
     else if(len > 1){
         for(int i = 0; i < strlen(buf) && flag != len; i++){
-            if(buf[i] != ' ' && buf[i-1] == ' ' || i == 0){
+            if(buf[i] == ' ' || buf[i] == '\n' || buf[i] == '\t' || buf[i] == '\r'){
+                continue;
+            }
+            else{
                 flag++;
                 if(flag == len){
                     int j = 0;
-                    while(buf[i] != ' '){
+                    while(buf[i] != ' ' && buf[i] != '\n' && buf[i] != '\t' && buf[i] != '\r' && i < strlen(buf)){
                         strbuf[j] = buf[i];
                         j++;
                         i++;
                     }
                     break;
+                }
+                else{
+                    while(buf[i] != ' ' && buf[i] != '\n' && buf[i] != '\t' && buf[i] != '\r' && i < strlen(buf)){
+                        i++;
+                    }
                 }
             }
         }
@@ -132,12 +151,13 @@ void parseStr(char *buf, char **str, int len){
     return;
 }
 
-int Tasks = 0;
+
 
 // get tasks info
 void getTasksInfo(){
     DIR *dir;
     struct dirent *ptr;
+    int Tasks = 0;
     int running, sleeping, stopped, zombie;
     running = sleeping = stopped = zombie = 0;
     
@@ -183,6 +203,8 @@ void getTasksInfo(){
     return;
 }
 
+// user, nice, system, idle, iowait,
+// irrq, softirq, steal, guest, guest_nice
 int CPUInfo1[10];
 double CPUInfo[10];
 
@@ -191,8 +213,6 @@ void getCPUInfo(int time){
     if(time == 2){
         char buf[2048] = {0};
         char *bbuf, *tmp;
-        // user, nice, system, idle, iowait,
-        // irrq, softirq, steal, guest, guest_nice
         int CPUInfo2[10];
 
         bbuf = parseFile("/proc/stat", buf, "", "");
@@ -222,12 +242,12 @@ void getCPUInfo(int time){
 }
 
 // get mem info
+int Mem[5], Swap[2];
 void getMemInfo(){
     char buf[2048] = {0};
     char *bbuf, *tmp;
     // MenTotal, MemFree, MemAvailable, Buffers, Cache
     // SwapTotal, SwapFree, 
-    int Mem[5], Swap[2];
 
     bbuf = parseFile("/proc/meminfo", buf, "", "Dirty");
     tmp = parseBuf(bbuf, "", "SwapCached");
@@ -267,130 +287,161 @@ void getStatus(){
 }
 
 int row, cow;
+int proctime = 0;
 
 // get proc info
 /* not done yet */
-void getProcInfo(int row, int time){
+void getProcInfo(){
     DIR *dir;
     struct dirent *ptr;
-    int running, sleeping, stopped, zombie;
-    running = sleeping = stopped = zombie = 0;
-
-    int order[Tasks];
-    char info[Tasks][20];
+    struct ProcInfo info;
     
     dir = opendir("/proc");
     int i = 0;
-    while((ptr = readdir(dir)) != NULL){    
+    while((ptr = readdir(dir)) != NULL){
         if(strspn(ptr->d_name, "0123456789") == strlen(ptr->d_name)){
             char buf[2048] = {0};
             char *tmp;
             char path[30];
             
-            // user
-            sprintf(path, "/proc/%d", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, ptr->d_name, "");
+            sprintf(path, "/proc/%d/statm", atoi(ptr->d_name));            
+            tmp = parseFile(path, buf, "", "");
             if(tmp == NULL){
-                continue;
-            }
-            else{
-                
-                free(tmp);
-            }
-
-            // sprintf(path, "/proc/%d", atoi(ptr->d_name));
-            // tmp = parseFile(path, buf, ptr->d_name, "");
-            // if(tmp == NULL){
-            //     continue;
-            // }
-            // else{
-                
-            //     free(tmp);
-            // }
-
-            // mem
-            sprintf(path, "/proc/%d/statum", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, ptr->d_name, "");
-            if(tmp == NULL){
+                info.pid = 0;
                 continue;
             }
             else{
                 char *state;
-
                 // shr
                 parseStr(tmp, &state, 3);
-                memcpy(&info[i][2], state, strlen(state));
-
-                // res
+                info.shr = atoi(state) * 4;
 
                 free(tmp);
             }
-
-            // s pr ni
+            
+            // pr ni s
             sprintf(path, "/proc/%d/stat", atoi(ptr->d_name));
             tmp = parseFile(path, buf, ptr->d_name, "");
             if(tmp == NULL){
+                info.pid = 0;
                 continue;
             }
             else{
                 char *state;
                 // pr
                 parseStr(tmp, &state, 18);
-                memcpy(&info[i][2], state, strlen(state));
+                info.pr = atoi(state);
+                free(state);
                 // ni
                 parseStr(tmp, &state, 19);
-                memcpy(&info[i][3], state, strlen(state));
+                info.ni = atoi(state);
+                free(state);
                 // s
                 parseStr(tmp, &state, 3);
-                memcpy(&info[i][7], state, strlen(state));
+                info.s = state[0];
+                free(state);
+
+                // time
+                int proctime1 = 0;
+                parseStr(tmp, &state, 14);
+                proctime1 += atoi(state);
+                free(state);
+                parseStr(tmp, &state, 15);
+                proctime1 += atoi(state);
+                free(state);
+                info.time = proctime1 * sysconf(_SC_CLK_TCK);
+
                 free(tmp);
             }
 
-            // %cpu
-
-            // %mem
-
-            // time
-
-            // command
+            // user command virt res
             sprintf(path, "/proc/%d/status", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, ptr->d_name, "");
+            tmp = parseFile(path, buf, "", "");
             if(tmp == NULL){
+                info.pid = 0;
                 continue;
             }
             else{
                 char *state;
-                // command
-                parseStr(tmp, &state, 2);
-                memcpy(&info[i][11], state, strlen(state));
-
-                // vm
                 char *ttmp;
-                ttmp = parseBuf(tmp, "VmSize", "VmLck");
-                parseStr(ttmp, &state, 2);
-                memcpy(&info[i][4], state, strlen(state));
-                free(state);
-
-                // uid
-                ttmp = parseBuf(tmp, "uid:", "");
-                parseStr(ttmp, &state, 2);
-                memcpy(&info[i][0], state, strlen(state));
-                free(state);
                 
+                // command
+                state = parseBuf(tmp, "", "Gid:");
+                parseStr(state, &ttmp, 2);
+                if(strlen(ttmp) > 20){
+                    ttmp[19] = '\0';
+                }
+                strcpy(info.command, ttmp);
+                free(ttmp);
+                
+                // user
+                state = parseBuf(tmp, "Uid:", "Gid:");
+                ttmp = getpwuid(atoi(state + 4))->pw_name;
+                if(strlen(ttmp) > 8) {
+                    ttmp[7] = '+';
+                    ttmp[8] = '\0';
+                }
+                strcpy(info.user, ttmp);
+
+                // virt
+                state = parseBuf(tmp, "VmSize:", "VmLck:");
+                parseStr(state, &ttmp, 2);
+                info.virt = atoi(ttmp);
+                free(ttmp);
+
+                // res
+                state = parseBuf(tmp, "VmRSS:", "RssAnon:");
+                parseStr(state, &ttmp, 2);
+                info.res = atoi(ttmp);
+                free(ttmp);
+
                 free(tmp);
             }
 
-            // pid (info line invaild if pid == 0)
-            info[i][0] = atoi(ptr->d_name);
+            // %mem
+            info.mem = info.res / (Mem[0] * 10 / 1024.);
+            
+            // %cpu
+
+
+            // pid
+            info.pid = atoi(ptr->d_name);
+            
+            if(info.pid != 0){
+                printf("%7d", info.pid);
+                printf(" %-8s", info.user);
+                printf("%4d", info.pr);
+                printf("%4d", info.ni);
+                if(info.virt > 9999999){
+                    printf("%7.1fg", info.virt/1024./1024.);
+                }
+                else{
+                    printf("%8d", info.virt);
+                }
+                if(info.res > 999999){
+                    printf("%6.1fg", info.res/1024./1024.);
+                }
+                else{
+                    printf("%7d", info.res);
+                }
+                if(info.shr > 999999){
+                    printf("%6.1fg", info.shr/1024./1024.);
+                }
+                else{
+                    printf("%7d", info.shr);
+                }
+                printf(" %c", info.s);
+                printf("%6.1lf", info.cpu);
+                printf("%6.1lf", info.mem);
+                printf("%4d:%02d.%02d", (info.time/10000/60), (info.time/10000%60), (info.time%10000/100));
+                printf(" %s\n", info.command);
+            }
+
             i++;
         }
-        for(int i = 0; i < Tasks; i++){
-            for(int j = 0; j < 12; j++){
-                printf("%s ", &info[i][j]);
-            }
-            printf("\n");
-        }
     }
+    closedir(dir);
+    return;
 }
 
 int main() {
@@ -412,7 +463,8 @@ int main() {
 
         printf("\n    PID USER      PR  NI    VIRT    RES    SHR S  %%CPU  %%MEM     TIME+ COMMAND\n");
         // getProcInfo(row, time);
-        
+        getProcInfo();
+
         time = time == 2 ? 0 : time + 1;
         sleep(1);
     }
