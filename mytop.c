@@ -216,7 +216,7 @@ void getCPUInfo(int time){
 
         bbuf = parseFile("/proc/stat", buf, "", "", 1024);
         tmp = parseBuf(bbuf, "cpu", "cpu0");
-       	printf(">>>> %s\n", bbuf);
+       	// printf(">>>> %s\n", bbuf);
        	parseNum(tmp, CPUInfo2, 10);
 	free(buf);
 	// puts("free >>> buf");
