@@ -27,24 +27,23 @@ struct ProcInfo{
 };
 
 // read /proc/xxx to buffer
-int readProcFile(const char *filename, char *buf) {
+// there is a OOB in fread, bug will be fixed by add a buffer size argument
+int readProcFile(const char *filename, char *buf, int len) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         return -1;
     }
 
-    while (fread(buf, 1, 1024, file)) {
-        buf += 1024;
-    }
+    fread(buf, 1, len, file);
 
     fclose(file);
 }
 
 // parse file, return the block between head and tail
-char* parseFile(char* path, char* buf, char* head, char* tail){
+char* parseFile(char* path, char* buf, char* head, char* tail, int len){
     int h = 0, t = 0;
     char *block;
-    if(readProcFile(path, buf) == -1){
+    if(readProcFile(path, buf, len) == -1){
         return NULL;
     }
     if(head != ""){
@@ -168,7 +167,7 @@ void getTasksInfo(){
             char *tmp;
             char path[30];
             sprintf(path, "/proc/%d/stat", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, ptr->d_name, "");
+            tmp = parseFile(path, buf, ptr->d_name, "", 2048);
             if(tmp == NULL){
                 continue;
             }
@@ -211,20 +210,36 @@ double CPUInfo[10];
 // get cpu info
 void getCPUInfo(int time){ 
     if(time == 2){
-        char buf[2048] = {0};
+	// TODO: dynamic allocate memery
+        // char buf[20480] = {0};
+	struct stat st;
+	if(stat("/proc/stat", &st) != 0){
+	    printf("try to calulate the length of /proc/stat, but got failed\n");
+	    exit(0);
+	}
+	char *buf = calloc(1, st.st_size);
         char *bbuf, *tmp;
         int CPUInfo2[10];
 
-        bbuf = parseFile("/proc/stat", buf, "", "");
+        bbuf = parseFile("/proc/stat", buf, "", "", st.st_size);
         tmp = parseBuf(bbuf, "cpu", "cpu0");
-        parseNum(tmp, CPUInfo2, 10);
+       	// printf(">>> %s\n", tmp);
+       	parseNum(tmp, CPUInfo2, 10);
+	free(buf);
+	// puts("free >>> buf");
         free(tmp);
+	// puts("free >>> tmp");
+	free(bbuf);
+	// puts("free >>> bbuf");
 
         for(int i = 0; i < 10; i++){
-            CPUInfo[i] = (CPUInfo2[i]-CPUInfo1[i])*100. / ((CPUInfo2[0]+CPUInfo2[1]+CPUInfo2[2]+CPUInfo2[3])*1.-(CPUInfo1[0]+CPUInfo1[1]+CPUInfo1[2]+CPUInfo1[3])*1.);
-        }
-        for(int i = 0; i < 10; i++){
-            CPUInfo1[i] = CPUInfo2[i];
+	    int ttmp = (CPUInfo2[0]+CPUInfo2[1]+CPUInfo2[2]+CPUInfo2[3])- \
+		      (CPUInfo1[0]+CPUInfo1[1]+CPUInfo1[2]+CPUInfo1[3]);
+            if(ttmp > 0)
+		CPUInfo[i] = (CPUInfo2[i]-CPUInfo1[i])*100. / ttmp;
+	    else
+		CPUInfo[i] = 0;
+	    CPUInfo1[i] = CPUInfo2[i];
         }
     }
 
@@ -249,7 +264,7 @@ void getMemInfo(){
     // MenTotal, MemFree, MemAvailable, Buffers, Cache
     // SwapTotal, SwapFree, 
 
-    bbuf = parseFile("/proc/meminfo", buf, "", "Dirty");
+    bbuf = parseFile("/proc/meminfo", buf, "", "Dirty", 2048);
     tmp = parseBuf(bbuf, "", "SwapCached");
     parseNum(tmp, Mem, 5);
     free(tmp);
@@ -276,12 +291,12 @@ void getStatus(){
     char *tmp;
 
     printf("Hostname: ");
-    readProcFile("/proc/sys/kernel/hostname", buf);
+    readProcFile("/proc/sys/kernel/hostname", buf, 2048);
     printf("%s", buf);
     memset(buf, 0, sizeof(buf));
 
     printf("System Uptime: ");
-    readProcFile("/proc/uptime", buf);
+    readProcFile("/proc/uptime", buf, 2048);
     printf("%s", buf);
     memset(buf, 0, sizeof(buf));
 }
@@ -305,7 +320,7 @@ void getProcInfo(){
             char path[30];
             
             sprintf(path, "/proc/%d/statm", atoi(ptr->d_name));            
-            tmp = parseFile(path, buf, "", "");
+            tmp = parseFile(path, buf, "", "", 2048);
             if(tmp == NULL){
                 info.pid = 0;
                 continue;
@@ -321,7 +336,7 @@ void getProcInfo(){
             
             // pr ni s
             sprintf(path, "/proc/%d/stat", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, ptr->d_name, "");
+            tmp = parseFile(path, buf, ptr->d_name, "", 2048);
             if(tmp == NULL){
                 info.pid = 0;
                 continue;
@@ -356,7 +371,7 @@ void getProcInfo(){
 
             // user command virt res
             sprintf(path, "/proc/%d/status", atoi(ptr->d_name));
-            tmp = parseFile(path, buf, "", "");
+            tmp = parseFile(path, buf, "", "", 2048);
             if(tmp == NULL){
                 info.pid = 0;
                 continue;
