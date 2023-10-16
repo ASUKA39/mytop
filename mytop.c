@@ -27,7 +27,6 @@ struct ProcInfo{
 };
 
 // read /proc/xxx to buffer
-// there is a OOB in fread, bug will be fixed by add a buffer size argument
 int readProcFile(const char *filename, char *buf, int len) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -35,7 +34,7 @@ int readProcFile(const char *filename, char *buf, int len) {
     }
 
     fread(buf, 1, len, file);
-
+    // printf(">> %s", buf);
     fclose(file);
 }
 
@@ -59,6 +58,7 @@ char* parseFile(char* path, char* buf, char* head, char* tail, int len){
     }
     else{
         t = strlen(buf);
+    	// t = len;
     }
     
     block = calloc(1, t - h + 1);
@@ -210,20 +210,13 @@ double CPUInfo[10];
 // get cpu info
 void getCPUInfo(int time){ 
     if(time == 2){
-	// TODO: dynamic allocate memery
-        // char buf[20480] = {0};
-	struct stat st;
-	if(stat("/proc/stat", &st) != 0){
-	    printf("try to calulate the length of /proc/stat, but got failed\n");
-	    exit(0);
-	}
-	char *buf = calloc(1, st.st_size);
-        char *bbuf, *tmp;
+        char *buf = calloc(1, 1024);
+	char *bbuf, *tmp;
         int CPUInfo2[10];
 
-        bbuf = parseFile("/proc/stat", buf, "", "", st.st_size);
+        bbuf = parseFile("/proc/stat", buf, "", "", 1024);
         tmp = parseBuf(bbuf, "cpu", "cpu0");
-       	// printf(">>> %s\n", tmp);
+       	printf(">>>> %s\n", bbuf);
        	parseNum(tmp, CPUInfo2, 10);
 	free(buf);
 	// puts("free >>> buf");
@@ -240,6 +233,7 @@ void getCPUInfo(int time){
 	    else
 		CPUInfo[i] = 0;
 	    CPUInfo1[i] = CPUInfo2[i];
+	    printf(">>> %d", CPUInfo2[i]);
         }
     }
 
