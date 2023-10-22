@@ -34,7 +34,6 @@ int readProcFile(const char *filename, char *buf, int len) {
     }
 
     fread(buf, 1, len, file);
-    // printf(">> %s", buf);
     fclose(file);
 }
 
@@ -216,14 +215,10 @@ void getCPUInfo(int time){
 
         bbuf = parseFile("/proc/stat", buf, "", "", 1024);
         tmp = parseBuf(bbuf, "cpu", "cpu0");
-       	// printf(">>>> %s\n", bbuf);
        	parseNum(tmp, CPUInfo2, 10);
-	free(buf);
-	// puts("free >>> buf");
+	    free(buf);
         free(tmp);
-	// puts("free >>> tmp");
-	free(bbuf);
-	// puts("free >>> bbuf");
+	    free(bbuf);
 
         for(int i = 0; i < 10; i++){
 	    int ttmp = (CPUInfo2[0]+CPUInfo2[1]+CPUInfo2[2]+CPUInfo2[3])- \
@@ -233,7 +228,6 @@ void getCPUInfo(int time){
 	    else
 		CPUInfo[i] = 0;
 	    CPUInfo1[i] = CPUInfo2[i];
-	    printf(">>> %d", CPUInfo2[i]);
         }
     }
 
@@ -411,7 +405,7 @@ void getProcInfo(){
             info.mem = info.res / (Mem[0] * 10 / 1024.);
             
             // %cpu
-
+            // TODO: calculate %CPU
 
             // pid
             info.pid = atoi(ptr->d_name);
